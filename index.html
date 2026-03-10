@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="pt-pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FIFA DATABASE PRO</title>
+    <style>
+        :root { --bg: #0d0d0f; --card: #16161a; --neon: #00ff87; --gold: #ffd700; --danger: #ff4444; --text: #ffffff; }
+        body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; }
+        .container { width: 100%; max-width: 900px; }
+        header { text-align: center; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; cursor: pointer; }
+        
+        /* Cores da Tabela */
+        .pos-1 { background: rgba(255, 215, 0, 0.1) !important; color: var(--gold); font-weight: bold; }
+        .pos-last { background: rgba(255, 68, 68, 0.1) !important; color: var(--danger); }
+        
+        #adminPanel { display: none; background: #1a1a1e; padding: 15px; border-radius: 10px; border: 1px solid var(--neon); margin-bottom: 20px; }
+        .btn { padding: 10px; border-radius: 5px; cursor: pointer; border: none; font-weight: bold; text-transform: uppercase; font-size: 11px; margin: 2px; }
+        .btn-green { background: var(--neon); color: #000; }
+        .btn-blue { background: #00d4ff; color: #fff; }
+        
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; justify-content: center; }
+        .tab-btn { background: #222; color: #fff; padding: 10px 20px; border-radius: 20px; border: none; cursor: pointer; }
+        .tab-btn.active { background: var(--neon); color: #000; }
+
+        table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; overflow: hidden; }
+        th { background: #222; color: #888; font-size: 10px; padding: 10px; text-transform: uppercase; }
+        td { padding: 12px 8px; border-bottom: 1px solid #222; text-align: center; font-size: 14px; }
+        .nome-player { text-align: left; font-weight: bold; }
+
+        .gallery-grid { display: none; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; }
+        .card { background: var(--card); border-radius: 10px; padding: 15px; text-align: center; border: 1px solid #333; }
+        .row-edit { display: flex; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; background: #25252b; padding: 10px; border-radius: 5px; }
+        input { background: #000; border: 1px solid #444; color: #fff; padding: 5px; border-radius: 3px; width: 50px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header onclick="acesso()">
+        <h1>FIFA <span style="color:var(--neon)">DATABASE</span></h1>
+        <p style="font-size:10px; color:#666">v4.9 - ESTÁVEL</p>
+    </header>
+
+    <div id="adminPanel">
+        <button class="btn btn-blue" onclick="exportar()">Backup</button>
+        <button class="btn btn-blue" onclick="importar()">Restaurar</button>
+        <div id="editor"></div>
+        <button onclick="add()" class="btn btn-green" style="width:100%">+ Adicionar Jogador</button>
+        <button onclick="salvar()" class="btn btn-green" style="width:100%; margin-top:10px; height:40px">Salvar Alterações</button>
+        <button onclick="encerrar()" class="btn" style="background:#400; color:#f66; width:100%; margin-top:5px">Encerrar Época</button>
+    </div>
+
+    <div class="tabs">
+        <button id="tabelaBtn" class="tab-btn active" onclick="tab('tabela')">Tabela</button>
+        <button id="galeriaBtn" class="tab-btn" onclick="tab('galeria')">Galeria</button>
+    </div>
+
+    <div id="contentTabela">
+        <select id="view" onchange="mudarView(this.value)" style="width:100%; padding:10px; background:#222; color:#fff; border-radius:5px; margin-bottom:10px;"></select>
+        <div style="overflow-x:auto">
+            <table>
+                <thead>
+                    <tr><th>POS</th><th style="text-align:left">JOGADOR</th><th>PTS</th><th>V</th><th>E</th><th>D</th><th>GF</th><th>GS</th><th>%</th></tr>
+                </thead>
+                <tbody id="tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="contentGaleria" class="gallery-grid"></div>
+</div>
+
+<script>
+    const KEY = 'fifa_final_v49';
+    let db = JSON.parse(localStorage.getItem(KEY)) || { atual: [], historico: [] };
+    let modo = 'atual';
+
+    function acesso() { if(prompt("Senha:") === '123') document.getElementById('adminPanel').style.display='block'; }
+
+    function tab(t) {
+        document.getElementById('contentTabela').style.display = t === 'tabela' ? 'block' : 'none';
+        document.getElementById('contentGaleria').style.display = t === 'galeria' ? 'grid' : 'none';
+        document.getElementById('tabelaBtn').className = t === 'tabela' ? 'tab-btn active' : 'tab-btn';
+        document.getElementById('galeriaBtn').className = t === 'galeria' ? 'tab-btn active' : 'tab-btn';
+        if(t === 'galeria') renderGaleria();
+    }
+
+    function render() {
+        const menu = document.getElementById('view');
+        menu.innerHTML = '<option value="atual">Temporada Atual</option>';
+        db.historico.forEach((h, i) => menu.innerHTML += `<option value="${i}">${h.nome}</option>`);
+
+        let lista = modo === 'atual' ? [...db.atual] : [...db.historico[modo].dados];
+        lista.sort((a,b) => ((b.v*3)+b.e) - ((a.v*3)+a.e) || (b.gp-b.gc) - (a.gp-a.gc));
+
+        const body = document.getElementById('tbody');
+        body.innerHTML = lista.map((j, i) => {
+            let pts = (j.v*3)+j.e;
+            let jogos = j.v+j.e+j.d;
+            let aprov = jogos > 0 ? ((pts/(jogos*3))*100).toFixed(0) : 0;
+            
+            let classe = "";
+            let icon = "";
+            if(i === 0) { classe = "pos-1"; icon = "👑 "; }
+            if(i === lista.length - 1 && lista.length > 2) { classe = "pos-last"; icon = "⚠️ "; }
+
+            return `<tr class="${classe}">
+                <td>${i+1}º</td>
+                <td class="nome-player">${icon}${j.nome}</td>
+                <td>${pts}</td><td>${j.v}</td><td>${j.e}</td><td>${j.d}</td>
+                <td>${j.gp}</td><td>${j.gc}</td><td>${aprov}%</td>
+            </tr>`;
+        }).join('');
+
+        document.getElementById('editor').innerHTML = db.atual.map((j, i) => `
+            <div class="row-edit">
+                <input style="width:100px" type="text" value="${j.nome}" onchange="db.atual[${i}].nome=this.value">
+                V <input type="number" value="${j.v}" onchange="db.atual[${i}].v=parseInt(this.value)">
+                E <input type="number" value="${j.e}" onchange="db.atual[${i}].e=parseInt(this.value)">
+                D <input type="number" value="${j.d}" onchange="db.atual[${i}].d=parseInt(this.value)">
+                GF <input type="number" value="${j.gp}" onchange="db.atual[${i}].gp=parseInt(this.value)">
+                GS <input type="number" value="${j.gc}" onchange="db.atual[${i}].gc=parseInt(this.value)">
+                <button onclick="db.atual.splice(${i},1);salvar()" style="color:red; background:none; border:none;">X</button>
+            </div>
+        `).join('');
+    }
+
+    function renderGaleria() {
+        const g = document.getElementById('contentGaleria');
+        g.innerHTML = db.historico.map(h => `
+            <div class="card">
+                <small>${h.nome}</small>
+                <h3>${h.dados[0].nome}</h3>
+                <div style="color:var(--gold)">🏆 CAMPEÃO</div>
+            </div>
+        `).join('') || "<p>Nenhum campeão ainda.</p>";
+    }
+
+    function mudarView(v) { modo = v; render(); }
+    function salvar() { localStorage.setItem(KEY, JSON.stringify(db)); render(); }
+    function add() { db.atual.push({nome: "Novo", v:0, e:0, d:0, gp:0, gc:0}); render(); }
+    
+    function exportar() {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([JSON.stringify(db)], {type:'application/json'}));
+        a.download = 'backup_fifa.json'; a.click();
+    }
+
+    function importar() {
+        const f = document.createElement('input'); f.type = 'file';
+        f.onchange = e => {
+            const r = new FileReader(); r.readAsText(e.target.files[0]);
+            r.onload = ev => { db = JSON.parse(ev.target.result); salvar(); location.reload(); };
+        };
+        f.click();
+    }
+
+    function encerrar() {
+        let n = prompt("Nome da Época:");
+        if(n && db.atual.length > 0) {
+            db.atual.sort((a,b) => ((b.v*3)+b.e) - ((a.v*3)+a.e));
+            db.historico.push({ nome: n, dados: JSON.parse(JSON.stringify(db.atual)) });
+            db.atual = db.atual.map(j => ({...j, v:0, e:0, d:0, gp:0, gc:0}));
+            salvar();
+        }
+    }
+
+    render();
+</script>
+</body>
+</html>
